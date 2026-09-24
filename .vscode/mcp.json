@@ -1,0 +1,8 @@
+{
+  "servers": {
+    "evaluation-review": {
+      "type": "http",
+      "url": "http://10.1.1.230:9382/mcp"
+    }
+  }
+}
