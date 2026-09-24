@@ -1,0 +1,9 @@
+# 临时产物目录（下载文件、调试脚本、中间输出）
+.temp/
+
+# macOS
+.DS_Store
+
+# 编辑器本地配置（保留 .vscode/mcp.json，忽略其余本地设置）
+.vscode/settings.json
+.vscode/launch.json
