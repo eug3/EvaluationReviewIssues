@@ -1,0 +1,249 @@
+# ============================================================
+# 知识图谱 Schema —— EvaluationReviewIssues
+#
+# 目标：表达「资产评估报告命题 ↔ 评估底稿证据」的支撑 / 不支持逻辑关系。
+#
+# 本文件在 GSDJSense/config/kg_schema.yaml 基础上扩展：
+#   - 新增节点：ReportClaim（报告命题）、EvidenceSpan（检索到的证据片段）
+#   - 新增边：ASKED / ANSWERED_BY / CONTRADICTED_BY /
+#            INSUFFICIENTLY_SUPPORTED_BY / MISSING_EVIDENCE
+#   - 扩展边：SUPPORTED_BY 的 source 增加 ReportClaim
+#
+# 仍然分三层：
+#   1. 来源层   (Source Layer)    — Document / Chunk / EvidenceSpan
+#   2. 命题层   (Claim Layer)     — ReportClaim / Task（追问）
+#   3. 实体层   (Entity Layer)    — 论证五要素 + 评估实体
+#
+# 修改此文件即可扩展图谱结构。
+# ============================================================
+
+node_types:
+
+  # ---- 来源层 (Source Layer) ----
+
+  Document:
+    description: RAGFlow 文档虚拟节点（原始报告 / 底稿文档）
+    virtual: true
+    examples:
+      - 资产评估报告
+      - 资产评估说明
+      - Excel 计算底稿
+      - 权属与附件资料
+
+  Chunk:
+    description: RAGFlow 文档块虚拟节点（语义段落）
+    virtual: true
+    examples:
+      - 文档分块后的单个文本块
+
+  EvidenceSpan:
+    description: 底稿证据片段 — 为回答某条追问而从底稿检索到的可定位证据
+    examples:
+      - 说明"收益法"章节中的折现率测算段落
+      - 计算表某 sheet 的合计行
+      - 附件中的评估明细表
+    properties:
+      - evidence_id
+      - source_dataset_id
+      - document_name
+      - doc_role          # report | statement | working_paper | attachment
+      - content
+      - positions         # RAGFlow 页码坐标
+      - similarity
+      - cell              # 可选：sheet / address
+      - retrieved_at
+
+  # ---- 命题层 (Claim Layer) ----
+
+  ReportClaim:
+    description: 报告命题 — 从资产评估报告中抽取的、可被底稿支撑或证伪的最小陈述单元
+    examples:
+      - "评估基准日为 2021 年 6 月 30 日"
+      - "采用收益法评估股东全部权益价值"
+      - "折现率取 10.5%"
+      - "股东全部权益评估值为 12,345.67 万元"
+      - "假设被评估单位持续经营"
+    properties:
+      - claim_id
+      - case_id
+      - doc_role          # report | summary
+      - section
+      - text              # 原文
+      - proposition       # 归一化后的陈述
+      - claim_type        # 见 schema/claim.yaml
+      - value
+      - unit
+      - currency
+      - locator           # chunk_id / document_name / positions
+      - confidence
+
+  Task:
+    description: 追问 / 审计检查项 — 针对报告命题向底稿提出的问题（来自 review_checklist.yaml 或案例特化生成）
+    examples:
+      - "折现率 10.5% 的测算依据与构成明细是什么？"
+      - "基准日与报告摘要是否一致？"
+    properties:
+      - question_id
+      - claim_id
+      - claim_type
+      - ask
+      - targets           # 期望抽取的实体类型
+      - expect_evidence
+      - rule
+      - severity
+      - ground            # 准则依据
+      - source            # template | generated | criterion
+
+  # ---- 实体层 (Entity Layer) — 论证五要素 ----
+
+  Conclusion:
+    description: 结论/判断/建议 — 评估师的最终判断或结论性陈述
+    examples:
+      - 最终评估值、价值区间
+      - "资产状况良好"
+
+  Evidence:
+    description: 数据/事实/引用 — 可验证的事实或证据来源
+    examples:
+      - 财务数据、市场数据、审计报告
+      - 合同条款、访谈记录
+
+  Reasoning:
+    description: 推理过程 — 从证据到结论的逻辑论证
+    examples:
+      - 为什么选某方法
+      - 为什么参数合理
+      - 计算步骤和公式推导
+
+  Assumption:
+    description: 前提假设 — 论证中的未验证前提条件
+    examples:
+      - 一般假设、特别假设
+      - 预测前提、市场条件假设
+
+  Rebuttal:
+    description: 反驳/挑战 — 对结论或证据的质疑、反证或不确定性说明
+    examples:
+      - 敏感性分析对参数的挑战
+      - 风险提示、不确定性说明
+      - 与其他数据源的矛盾
+
+  # ---- 资产评估实体层 (Valuation Entity Layer) ----
+
+  Parameter:
+    description: 评估参数 — 评估过程中使用的关键参数
+    examples:
+      - 折现率 10.5%
+      - 长期增长率 3%
+      - 加权平均资本成本（WACC）
+      - 资本化率、成新率
+
+  Method:
+    description: 评估方法 — 评估中采用的方法论或模型
+    examples:
+      - 收益法-DCF 模型
+      - 市场法-可比交易案例法
+      - 成本法-重置成本法
+
+  Data:
+    description: 市场/财务数据 — 可验证的外部或内部数据来源
+    examples:
+      - 市场利率数据
+      - 行业平均收益率
+      - 被评估单位财务报表数据
+
+  CalculationStep:
+    description: 计算步骤 — 从参数到结论的具体计算过程
+    examples:
+      - WACC 计算过程
+      - 折现现金流量计算
+      - 资产评估增减值计算
+
+
+edge_types:
+
+  # ---- 追问关系 (Questioning) — 本项目核心 ----
+
+  ASKED:
+    description: 报告命题触发的追问
+    direction: ReportClaim → Task
+
+  ANSWERED_BY:
+    description: 追问在底稿中定位到的证据（无命中的追问没有该边）
+    direction: Task → EvidenceSpan
+
+  # ---- 支撑 / 不支持关系 (Support Relations) — 本项目核心产出 ----
+
+  SUPPORTED_BY:
+    description: 底稿证据支持该报告命题（或任一底稿实体由证据支撑）
+    direction: ReportClaim | Conclusion | Method | Parameter | Data | Reasoning | Assumption | Rebuttal → EvidenceSpan | Evidence
+    edge_properties:
+      - verdict           # supported
+      - question_id
+      - confidence
+      - rationale
+
+  CONTRADICTED_BY:
+    description: 底稿证据与报告命题矛盾（金额/口径/基准日/方法不一致；同一文档内数字与大小写矛盾）
+    direction: ReportClaim → EvidenceSpan
+    edge_properties: [verdict, question_id, confidence, rationale]
+
+  INSUFFICIENTLY_SUPPORTED_BY:
+    description: 有部分或间接证据但不足以支撑命题（缺计算过程、缺来源、证据不可读）
+    direction: ReportClaim → EvidenceSpan
+    edge_properties: [verdict, question_id, confidence, rationale]
+
+  MISSING_EVIDENCE:
+    description: 按追问检索后底稿无对应证据（沉默，不等于证伪）
+    direction: ReportClaim → Task
+    edge_properties: [verdict, confidence, rationale, searched_scope]
+
+  # ---- 溯源关系 (Provenance) ----
+
+  FROM_DOCUMENT:
+    description: Chunk 来源于某个文档（系统自动添加）
+    direction: Chunk → Document
+
+  EXTRACTED_FROM:
+    description: 实体从某个 Chunk 中提取（系统自动添加）
+    direction: ReportClaim | Conclusion | Evidence | Reasoning | Assumption | Rebuttal | Parameter | Method | Data | CalculationStep → Chunk
+
+  BELONGS_TO:
+    description: Chunk 属于文档
+    direction: Chunk → Document
+    virtual: true
+
+  # ---- 资产评估逻辑关系 (Valuation Relations) ----
+
+  DERIVED_BY:
+    description: 结论由某种评估方法推导而来
+    direction: Conclusion → Method
+
+  DEPENDS_ON:
+    description: 评估方法依赖参数
+    direction: Method → Parameter
+
+  CALCULATED_FROM:
+    description: 参数由数据项计算得出
+    direction: Parameter → Data
+
+  SOURCED_FROM:
+    description: 数据项来源于证据文件
+    direction: Data → Evidence
+
+  CONDITIONED_ON:
+    description: 结论/方法/参数在假设成立前提下有效
+    direction: Conclusion | Method | Parameter → Assumption
+
+  LIMITED_BY:
+    description: 结论/方法受限制条件约束
+    direction: Conclusion | Method → Rebuttal
+
+  ANSWERS_WITH:
+    description: 追问与底稿解答实体的关联（保留自 GSDJSense）
+    direction: Task → Parameter | Method | Conclusion | Data
+    virtual: true
+
+  APPLIES_TO:
+    description: 方法适用性关系
+    direction: Method → Conclusion

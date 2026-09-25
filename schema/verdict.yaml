@@ -1,0 +1,128 @@
+# ============================================================
+# 判定体系 (Verdicts)
+#
+# 每个「报告命题 × 追问」得到一个 verdict。
+# verdict 决定写哪条关系边、进入问题清单的严重度、以及报告的措辞。
+#
+# 核心不变量：
+#   - missing（底稿沉默）≠ contradicted（底稿反证）≠ supported（底稿相符）
+#   - 检索为空不得读成"支持"；未核对范围必须显式写出
+#   - 每个 verdict 必须能追溯到 question + evidence（或显式 missing）
+# ============================================================
+
+version: 1
+
+verdicts:
+
+  - id: supported
+    name: 支撑
+    definition: 底稿中找到了明确证据，且与报告命题相符
+    graph_edge: SUPPORTED_BY
+    severity: info
+    in_issue_list: false
+    report_wording: "底稿已支撑"
+    confidence_floor: 0.6
+
+  - id: contradicted
+    name: 矛盾 / 反证
+    definition: 底稿存在明确证据，但与报告命题冲突（金额、口径、基准日、方法、主体等）
+    graph_edge: CONTRADICTED_BY
+    severity: high
+    in_issue_list: true
+    report_wording: "底稿与报告不一致"
+    confidence_floor: 0.5
+
+  - id: missing
+    name: 底稿无对应（不支持）
+    definition: 按追问要求检索后，底稿中找不到支撑该命题的证据（沉默，不等于命题为假）
+    graph_edge: MISSING_EVIDENCE
+    severity: medium
+    in_issue_list: true
+    report_wording: "底稿未见对应依据"
+    confidence_floor: 0.4
+
+  - id: insufficient
+    name: 证据不足
+    definition: 有部分或间接证据，但不足以支撑命题（缺计算过程、缺取值来源、证据不可读、多版本无法确定）
+    graph_edge: INSUFFICIENTLY_SUPPORTED_BY
+    severity: medium
+    in_issue_list: true
+    report_wording: "证据不足以支撑"
+    confidence_floor: 0.3
+
+  - id: not_applicable
+    name: 不适用
+    definition: 该命题/追问对本案不适用（如未采用的方法、空表无披露且非必填）
+    graph_edge: null
+    severity: info
+    in_issue_list: false
+    report_wording: "不适用"
+    confidence_floor: 0.6
+
+
+# ------------------------------------------------------------
+# 判定规则：按顺序执行，先确定性、后 LLM
+# ------------------------------------------------------------
+
+decision_rules:
+
+  - order: 1
+    id: deterministic_contradiction
+    kind: deterministic
+    when: 数值不相等（金额/比例/基准日/单位换算后仍不一致）、方法明确不适用、同一文档内数字与大小写矛盾
+    verdict: contradicted
+
+  - order: 2
+    id: deterministic_support
+    kind: deterministic
+    when: 数值一致、字段逐字一致、汇总链勾稽通过
+    verdict: supported
+
+  - order: 3
+    id: empty_after_escalation
+    kind: retrieval
+    when: 按 rule 规定的召回范围（同义关键词、扩大 page_size、去掉 document_ids 限制）检索后仍无命中
+    verdict: missing
+    note: 必须记录 searched_scope，供人工判断是否为召回失败
+
+  - order: 4
+    id: partial_evidence
+    kind: rule
+    when: 有命中但缺关键要素（无计算过程、无取值来源、证据不可读、多版本冲突）
+    verdict: insufficient
+
+  - order: 5
+    id: llm_judge
+    kind: llm
+    when: 以上均未命中，且存在可用证据
+    verdict: supported | contradicted | insufficient
+    contract:
+      - 必须逐条引用证据原文（evidence_id + 引文）
+      - 必须给出理由与置信度（0-1）
+      - 证据不足以判定时输出 insufficient，不得猜测
+      - 不得引用报告自身作为底稿证据
+
+  - order: 6
+    id: na_rule
+    kind: rule
+    when: 命题属于未采用的方法，或空表无披露且非必填
+    verdict: not_applicable
+
+
+# ------------------------------------------------------------
+# 严重度分级（进入问题清单时使用，可被追问的 severity 覆盖）
+# ------------------------------------------------------------
+
+severity_overrides:
+  - claim_type: conclusion
+    when_verdict: [contradicted, missing]
+    severity: high
+  - claim_type: parameter
+    when_verdict: [contradicted, missing]
+    severity: high
+  - claim_type: base_date
+    when_verdict: [contradicted, missing]
+    severity: high
+  - claim_type: method
+    when_verdict: [contradicted, missing]
+    severity: high
