@@ -8,6 +8,7 @@
 
 渲染映射（YAML -> Markdown）：
     questions/底稿问题集.yaml       -> questions/底稿问题集.md
+    questions/处罚问题映射.yaml     -> questions/处罚问题映射.md
     questions/步骤复核表.yaml       -> questions/步骤复核表.md
     questions/review_checklist.yaml -> questions/review_checklist.md
     schema/claim.yaml               -> schema/claim.md
@@ -47,14 +48,106 @@ def render_qbank():
     L.append('> 共 ' + str(d['summary']['groups']) + ' 组 / ' + str(d['summary']['questions']) + ' 条；机器可读版 questions/底稿问题集.yaml')
     L += ['', '来源：']
     L += ['- ' + s for s in d['sources']]
+    legend = d.get('procedure_legend') or {}
+    if legend:
+        L += ['', '程序图例（每条问题标注所属基本程序）：']
+        L += ['- **' + k + '** ' + v for k, v in legend.items()]
     L += ['', '各科目逐条操作步骤见 questions/步骤复核表.md。', '', '---']
     for i, g in enumerate(d['groups'], 1):
         L += ['', '## ' + str(i) + '. ' + g['name'] + '（' + str(len(g['questions'])) + '）', '', '来源：' + g['source'], '']
         for q in g['questions']:
-            L.append('- [ ] **' + q['id'] + '** ' + q['ask'])
+            tag = ' `[' + q['procedure'] + ']`' if q.get('procedure') else ''
+            L.append('- [ ] **' + q['id'] + '**' + tag + ' ' + q['ask'])
             if q.get('check'):
                 L.append('      - 判定要点：' + q['check'])
     emit('questions/底稿问题集.yaml', L)
+
+
+def render_penalty():
+    d = load('questions/处罚问题映射.yaml')
+    L = ['# ' + d['title'], '']
+    L.append('> ' + d['purpose'])
+    src = d.get('source') or {}
+    sc = d.get('scope') or {}
+    sm = d.get('summary') or {}
+    L.append('>')
+    L.append('> 源表：' + str(src.get('file', '')) + '（sheet：' + str(src.get('sheet', '')) + '）')
+    L.append('>')
+    L.append('> 范围：' + str(sc.get('reports', '')) + ' 份报告 / ' + str(sc.get('penalty_docs', ''))
+             + ' 份处罚文件 / ' + str(sc.get('facts_dedup', '')) + ' 条去重事实；'
+             + '主题 ' + str(sm.get('themes', '')) + ' 个（缺口 ' + str(sm.get('themes_gap', ''))
+             + '），已归类 ' + str(sm.get('facts_classified', '')) + ' / 未归类 ' + str(sm.get('facts_unclassified', '')))
+    L.append('>')
+    L.append('> 抽取脚本：' + str(src.get('extracted_by', '')) + '；机器可读版 questions/处罚问题映射.yaml')
+    if src.get('confidential'):
+        L.append('>')
+        L.append('> ⚠️ 保密说明：' + str(src['confidential']))
+    if sc.get('note'):
+        L += ['', '> 口径说明：' + str(sc['note'])]
+
+    # 用途
+    L += ['', '## 如何使用', '']
+    L += ['- ' + s for s in (d.get('how_to_use') or [])]
+
+    # 按八大程序 + 红线：主题表
+    L += ['', '## 主题聚类（按监管处罚频次降序）', '',
+          '| 主题 | 程序 | 名称 | 频次 | 主主题 | 缺口 | 扩充前覆盖 | 本轮新增 |',
+          '| --- | --- | --- | --- | --- | --- | --- | --- |']
+    for t in d.get('themes') or []:
+        flag = '🚩红线' if t.get('redline') else ('❌缺口' if t.get('gap') else '')
+        cov = ', '.join(t.get('covered_by') or []) or '—'
+        add = ', '.join(t.get('added_by') or []) or '—'
+        L.append('| ' + t['id'] + ' | ' + str(t.get('procedure', '')) + ' | ' + cell(t['name'])
+                 + ' | ' + str(t.get('hits', '')) + ' | ' + str(t.get('primary_hits', ''))
+                 + ' | ' + flag + ' | ' + cell(cov) + ' | ' + cell(add) + ' |')
+
+    # 各程序主题分组 + 示例
+    L += ['', '## 各程序高频问题与脱敏示例', '']
+    for p in d.get('procedures') or []:
+        L += ['', '### ' + p['id'] + ' ' + p['name']
+              + '（事实 ' + str(p.get('count_by_source_type', '')) + '，主主题锚定 '
+              + str(p.get('count_primary_theme', '')) + '）', '']
+        tmap = {t['id']: t for t in d.get('themes') or []}
+        for tid in p.get('themes') or []:
+            t = tmap.get(tid)
+            if not t:
+                continue
+            head = '- **' + tid + '** ' + t['name'] + '（' + str(t.get('hits', '')) + '）'
+            if t.get('gap'):
+                head += ' ❌缺口'
+            if t.get('redline'):
+                head += ' 🚩红线'
+            if t.get('covered_by'):
+                head += ' 扩充前覆盖：' + ', '.join(t['covered_by'])
+            if t.get('added_by'):
+                head += ' 本轮新增：' + ', '.join(t['added_by'])
+            L.append(head)
+            for ex in (t.get('examples') or [])[:2]:
+                L.append('      - 例：' + cell(ex))
+
+    # 未归类样本
+    if d.get('unclassified_samples'):
+        L += ['', '## 未归类事实样本（供主题字典迭代）', '']
+        L += ['- ' + cell(s) for s in d['unclassified_samples']]
+
+    # 高频引用准则
+    if d.get('standards_cited_top'):
+        L += ['', '## 处罚决定高频引用准则条款', '',
+              '| 准则/条款 | 引用次数 |', '| --- | --- |']
+        for s in d['standards_cited_top']:
+            L.append('| ' + cell(s.get('name', '')) + ' | ' + str(s.get('count', '')) + ' |')
+
+    # 分布
+    dist = d.get('distribution') or {}
+    if dist.get('by_business_type'):
+        L += ['', '## 处罚分布', '', '### 按评估业务分类', '', '| 业务分类 | 事实数 |', '| --- | --- |']
+        for x in dist['by_business_type']:
+            L.append('| ' + cell(x.get('name', '')) + ' | ' + str(x.get('count', '')) + ' |')
+    if dist.get('by_regulator'):
+        L += ['', '### 按监管机构/地区（TOP）', '', '| 机构/地区 | 事实数 |', '| --- | --- |']
+        for x in dist['by_regulator'][:12]:
+            L.append('| ' + cell(x.get('name', '')) + ' | ' + str(x.get('count', '')) + ' |')
+    emit('questions/处罚问题映射.yaml', L)
 
 
 def render_steps():
@@ -205,6 +298,7 @@ def render_report_section():
 
 ALL = [
     ('questions/底稿问题集.yaml', render_qbank),
+    ('questions/处罚问题映射.yaml', render_penalty),
     ('questions/步骤复核表.yaml', render_steps),
     ('questions/review_checklist.yaml', render_checklist),
     ('schema/claim.yaml', render_claim),
