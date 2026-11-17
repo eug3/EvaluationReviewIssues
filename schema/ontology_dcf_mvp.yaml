@@ -1,0 +1,215 @@
+# ============================================================
+# 资产评估底稿本体（极小闭环 MVP —— 收益法 DCF）
+#
+# 目标：从「报告追问检索图」转向「底稿逻辑本体」，用最小的 6 类 4 边
+#       和 4 条闭环校验规则，检验 DCF 评估结论是否真正被底稿支撑。
+#
+# 对应文档：docs/底稿本体设计（极小闭环）.md
+# 可读版：  schema/ontology_dcf_mvp.md
+# ============================================================
+
+version: 1
+scope: "收益法（DCF）参数—计算—结论极小闭环"
+purpose: "检验报告结论是否具备可溯源的计算模型、客观数据源与评估师分析判断过程，自动识别断链并映射到底稿问题集。"
+
+classes:
+  Engagement:
+    name: 项目基准
+    description: 锚定项目全局口径与时间边界的上下文节点
+    properties:
+      - name: case_id
+        type: string
+        required: true
+      - name: valuation_base_date
+        type: date
+        required: true
+        note: 评估基准日，用于校验模型与取数证据是否错期
+      - name: valuation_purpose
+        type: string
+        required: true
+      - name: target_entity
+        type: string
+        required: true
+
+  ReportClaim:
+    name: 报告结论与关键披露
+    description: 评估报告/说明中载明的最终结论值或核心量化披露项
+    examples:
+      - 股东全部权益评估值 X 万元
+      - 折现率（WACC）取 Y%
+      - 预测期营业收入复合增长率 Z%
+    properties:
+      - name: claim_id
+        type: string
+        required: true
+      - name: claim_kind
+        type: enum
+        values: [conclusion_value, discount_rate, key_forecast_metric, non_operating_adjustment]
+        required: true
+      - name: value
+        type: number
+        required: true
+      - name: unit
+        type: string
+        required: true
+      - name: locator
+        type: string
+        required: true
+        note: 报告章节与页码坐标
+
+  ValuationModel:
+    name: 测算底稿模型
+    description: 收益法测算工作底稿（对应 DCF 计算表及各分表）
+    examples:
+      - DCF 汇总与估值结果表
+      - WACC 折现率测算表
+      - 营业收入与成本预测表
+    properties:
+      - name: model_id
+        type: string
+        required: true
+      - name: sheet_name
+        type: string
+        required: true
+      - name: base_date
+        type: date
+        required: true
+      - name: output_value
+        type: number
+        required: true
+      - name: output_cell
+        type: string
+        required: true
+
+  Parameter:
+    name: 关键评估参数
+    description: 模型测算中必须留痕与核验的核心输入参数或调整项
+    categories:
+      - id: revenue_growth
+        name: 收入增长率/销量/单价
+        required_for_dcf: true
+      - id: gross_margin
+        name: 毛利率/成本率
+        required_for_dcf: true
+      - id: capex_depreciation
+        name: 资本性支出与折旧摊销
+        required_for_dcf: true
+      - id: working_capital
+        name: 营运资金及期末回收
+        required_for_dcf: true
+      - id: discount_rate_components
+        name: 折现率各构成（Rf、ERP、Beta、特定风险、债务成本、资本结构）
+        required_for_dcf: true
+      - id: non_operating_surplus
+        name: 非经营性资产/负债与溢余资产
+        required_for_dcf: true
+    properties:
+      - name: param_id
+        type: string
+        required: true
+      - name: category
+        type: string
+        required: true
+      - name: name
+        type: string
+        required: true
+      - name: value
+        type: string
+        required: true
+      - name: cell
+        type: string
+        required: false
+
+  SourceEvidence:
+    name: 支撑资料证据
+    description: 参数取值所依据的原始底稿或外部数据资料
+    properties:
+      - name: evidence_id
+        type: string
+        required: true
+      - name: source_kind
+        type: enum
+        values: [objective_external, historical_audited, client_provided]
+        required: true
+        note: 区分客观外部/历史审定数据与委托人单方提供数据，用于识别仅依赖委托人预测的断链
+      - name: document_name
+        type: string
+        required: true
+      - name: data_date
+        type: date
+        required: false
+      - name: locator
+        type: string
+        required: true
+
+  AnalysisNote:
+    name: 分析判断记录
+    description: 评估师对参数取值依据、历史差异、市场合理性所作的核查与分析过程留痕
+    examples:
+      - 对委托人盈利预测的核查验证说明
+      - 预测期增长率与历史差异原因分析
+      - WACC 资本结构与可比公司口径说明
+    properties:
+      - name: note_id
+        type: string
+        required: true
+      - name: summary
+        type: string
+        required: true
+      - name: locator
+        type: string
+        required: true
+
+relations:
+  DERIVED_FROM:
+    from: ReportClaim
+    to: ValuationModel
+    description: 报告结论或关键披露数值直接来源于某张测算底稿模型
+
+  USES_PARAM:
+    from: ValuationModel
+    to: Parameter
+    description: 测算底稿模型使用了哪些关键参数与调整项
+
+  SOURCED_FROM:
+    from: Parameter
+    to: SourceEvidence
+    description: 参数取值引用的原始数据或外部资料来源
+
+  JUSTIFIED_BY:
+    from: Parameter
+    to: AnalysisNote
+    description: 参数取值的分析判断、调整理由与核查验证过程
+
+validation_rules:
+  - id: R-01
+    name: 数值双向闭合
+    description: ReportClaim 的数值必须与所连 ValuationModel 的 output_value 一致
+    check: "ReportClaim.value == ValuationModel.output_value"
+    severity: high
+    maps_to_questions: [Q-SB-005]
+    maps_to_penalties: [T-RP-02, T-VA-09]
+
+  - id: R-02
+    name: 参数双链约束（防形式挂靠）
+    description: 任何核心 Parameter 不能仅连向 client_provided 的 SourceEvidence；必须至少同时具备 objective_external/historical_audited 证据，或具备 AnalysisNote 分析判断记录
+    check: "has(SOURCED_FROM[objective_external|historical_audited]) OR has(JUSTIFIED_BY)"
+    severity: critical
+    maps_to_questions: [Q-SB-001, Q-DCF-005, Q-DCF-006, Q-DCF-015, Q-DCF-016]
+    maps_to_penalties: [T-VA-01, T-VA-04, T-VA-03]
+
+  - id: R-03
+    name: DCF 关键要素完备性
+    description: ValuationModel 必须覆盖 Parameter 中标记 required_for_dcf=true 的全部 6 类关键参数，不得遗漏
+    check: "all required Parameter.categories present via USES_PARAM"
+    severity: high
+    maps_to_questions: [Q-DCF-008, Q-DCF-012, Q-DCF-017, Q-DCF-018, Q-SB-007]
+    maps_to_penalties: [T-VA-08]
+
+  - id: R-04
+    name: 基准日口径一致
+    description: ValuationModel.base_date 与关键取数时点应与 Engagement.valuation_base_date 对齐
+    check: "ValuationModel.base_date == Engagement.valuation_base_date"
+    severity: high
+    maps_to_questions: [Q-RE-010]
+    maps_to_penalties: [T-BM-01]

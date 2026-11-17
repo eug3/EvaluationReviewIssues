@@ -1,0 +1,250 @@
+# ============================================================
+# 资产评估底稿通用核心本体（Core Ontology）
+#
+# 目标：用稳定的「8 个核心类 + 7 条语义关系 + 5 类校验原语」，统一表达各类
+#       资产评估项目（企业价值/单项资产/无形资产/财报目的；收益法/市场法/
+#       资产基础法）的底稿支撑拓扑，并通过声明式 Profile 挂载各项目专属规则。
+#
+# 设计文档：docs/底稿本体架构设计.md
+# 可读版：  schema/ontology_core.md
+# 扩展实例：schema/ontology_dcf_mvp.yaml（收益法 DCF Profile 极小闭环）
+# ============================================================
+
+version: 1
+title: "资产评估底稿通用核心本体（Core + Profile）"
+purpose: "定义跨业务类型、跨评估方法通用的底稿支撑结构模具与闭合校验原语，将底稿复核问题转化为可判定的图拓扑与属性约束。"
+
+# ------------------------------------------------------------
+# 1. 通用核心类（8 Classes）
+# ------------------------------------------------------------
+core_classes:
+
+  Engagement:
+    name: 项目基准
+    domain: 全局与管理
+    procedures: [P1, P2, P3]
+    description: 锚定评估项目全局口径、业务类型、特殊监管属性与关键时间节点的根实体
+    key_properties:
+      - { name: case_id, type: string, required: true, note: 项目唯一标识 }
+      - { name: business_category, type: enum, values: [enterprise_value, single_asset, intangible_asset, financial_reporting], required: true, note: 四大业务分类 }
+      - { name: regulatory_tags, type: list, values: [state_owned, judicial, expropriation, listed_company, standard], required: true, note: 触发特殊披露与附件要求的监管标签 }
+      - { name: methods_adopted, type: list, values: [income_dcf, market, asset_based_cost], required: true, note: 采用的评估方法 }
+      - { name: valuation_purpose, type: string, required: true, note: 评估目的与对应经济行为 }
+      - { name: valuation_base_date, type: date, required: true, note: 评估基准日 }
+      - { name: contract_date, type: date, required: false, note: 业务约定书签订日 }
+      - { name: report_date, type: date, required: false, note: 评估报告日 }
+      - { name: archive_date, type: date, required: false, note: 归档日期 }
+      - { name: signing_appraisers, type: list, required: true, note: 报告签字资产评估师列表 }
+      - { name: reviewers, type: list, required: true, note: 内部复核/三级审核人员列表 }
+
+  SubjectAsset:
+    name: 评估对象与申报科目
+    domain: 对象与核查
+    procedures: [P1, P4, P5]
+    description: 被评估的具体标的或资产基础法下的申报科目（对应步骤复核表 72 个科目、单项房地设备、无形资产或表外资产负债）
+    key_properties:
+      - { name: subject_id, type: string, required: true, note: 对象或科目唯一标识 }
+      - { name: account_index, type: string, required: false, note: 底稿索引号（如 C3-5、C4-8-4、SY1） }
+      - { name: subject_type, type: enum, values: [equity_total, asset_group, financial_account, real_estate_land, equipment_vehicle, inventory, intangible, off_balance_item], required: true, note: 标的形态 }
+      - { name: book_value, type: number, required: false, note: 基准日账面值/审定数 }
+      - { name: operating_role, type: enum, values: [operating, non_operating, surplus], required: false, note: 经营性/非经营性/溢余属性 }
+      - { name: ownership_status, type: enum, values: [clear, mortgaged, frozen, uncertified, disputed], required: true, note: 权属状况，瑕疵项须透传至报告特别事项 }
+      - { name: location, type: string, required: false, note: 资产所在地（用于校验定额与市场案例区域匹配） }
+
+  ProcedureRecord:
+    name: 程序与合规留痕
+    domain: 对象与核查
+    procedures: [P3, P4, P8]
+    description: 证明评估师与质控人员履行法定程序的记录节点（勘察、盘点、函证、原件核对、访谈、三级审核）
+    key_properties:
+      - { name: record_id, type: string, required: true, note: 程序留痕唯一标识 }
+      - { name: procedure_kind, type: enum, values: [site_inspection, physical_count, confirmation_letter, original_verification, interview, plan_approval, internal_review], required: true, note: 程序类别 }
+      - { name: performed_date, type: date, required: false, note: 执行或核对日期 }
+      - { name: performers, type: list, required: true, note: 实际执行/签字人员 }
+      - { name: has_required_signatures, type: boolean, required: true, note: 是否具备要求的签字（如盘点三方签字、原件核对签字） }
+      - { name: has_official_seal, type: boolean, required: false, note: 是否加盖提供方公章或骑缝章 }
+      - { name: has_substantive_content, type: boolean, required: false, note: 审核或访谈记录是否包含实质内容与闭环回复 }
+
+  ValuationModel:
+    name: 测算底稿模型
+    domain: 模型与估值
+    procedures: [P6]
+    description: 执行评定估算的计算表或汇总模型（如 DCF 表组、市场法比较表、重置成本测算表、科目核实表）
+    key_properties:
+      - { name: model_id, type: string, required: true, note: 模型标识 }
+      - { name: method_type, type: enum, values: [dcf, multi_period_excess_earnings, listed_company_comparison, transaction_case_comparison, replacement_cost, account_verification], required: true, note: 具体估值模型类型 }
+      - { name: file_and_sheet, type: string, required: true, note: 所在底稿文件名（含索引号）及工作表名 }
+      - { name: base_date, type: date, required: true, note: 测算表采用基准日 }
+      - { name: output_value, type: number, required: true, note: 模型输出的评估值 }
+      - { name: formula_verified, type: boolean, required: false, note: 外部 Excel 公式与汇总脚本核验结果 }
+
+  Parameter:
+    name: 关键评估参数
+    domain: 模型与估值
+    procedures: [P6]
+    description: 驱动测算模型结论的重要输入参数、修正系数或调整项
+    key_properties:
+      - { name: param_id, type: string, required: true, note: 参数标识 }
+      - { name: slot_code, type: string, required: true, note: 对应 Profile 定义的参数槽位编码 }
+      - { name: name, type: string, required: true, note: 参数名称 }
+      - { name: value, type: string, required: true, note: 参数取值 }
+      - { name: tax_or_scope_basis, type: string, required: false, note: 口径标签（如税前/税后、合并/母公司、自身/目标资本结构） }
+      - { name: locator, type: string, required: false, note: 计算表单元格或说明定位 }
+
+  SourceEvidence:
+    name: 支撑资料证据
+    domain: 支撑与论证
+    procedures: [P4, P5]
+    description: 支撑参数取值、权属状态或账面数据的原始底稿与外部数据文件
+    key_properties:
+      - { name: evidence_id, type: string, required: true, note: 证据标识 }
+      - { name: source_kind, type: enum, values: [external_independent, historical_audited, client_provided], required: true, note: 证据独立性分级（外部独立客观 / 历史审定或核对原件 / 委托人单方提供） }
+      - { name: evidence_type, type: string, required: true, note: 证据形态（审计报告/合同/权证/询价记录/同花顺数据/盈利预测表等） }
+      - { name: file_index_code, type: string, required: false, note: 底稿文件索引号（用于与核实表对齐） }
+      - { name: data_date, type: date, required: false, note: 资料时点或函证基准日 }
+      - { name: locator, type: string, required: true, note: 文件名与页码/单元格定位 }
+
+  AnalysisNote:
+    name: 分析判断记录
+    domain: 支撑与论证
+    procedures: [P6, P7]
+    description: 评估师对方法适用性、参数合理性、历史差异原因、可比案例筛选及增减值原因的专业分析留痕
+    key_properties:
+      - { name: note_id, type: string, required: true, note: 分析记录标识 }
+      - { name: note_kind, type: enum, values: [method_applicability, parameter_justification, historical_variance_analysis, comparable_selection, appreciation_reason], required: true, note: 分析论证类型 }
+      - { name: summary, type: string, required: true, note: 论证核心逻辑摘要 }
+      - { name: locator, type: string, required: true, note: 所在评估说明章节或底稿备注位置 }
+
+  ReportClaim:
+    name: 报告结论与披露
+    domain: 报告与披露
+    procedures: [P7]
+    description: 资产评估报告、评估说明及评估明细表中对外载明的结论数值、核心参数、假设与特别事项说明
+    key_properties:
+      - { name: claim_id, type: string, required: true, note: 披露命题标识 }
+      - { name: artifact_role, type: enum, values: [report, statement, detail_schedule], required: true, note: 载体类型（报告正文/评估说明/评估明细表） }
+      - { name: claim_kind, type: enum, values: [valuation_conclusion, book_value_summary, key_parameter_statement, assumption, special_matter_disclosure, validity_period, legal_basis], required: true, note: 陈述类别 }
+      - { name: value, type: string, required: true, note: 披露数值或陈述内容 }
+      - { name: locator, type: string, required: true, note: 章节与页码定位 }
+
+# ------------------------------------------------------------
+# 2. 通用核心语义关系（7 Relations）
+# ------------------------------------------------------------
+core_relations:
+
+  HAS_SUBJECT:
+    from: Engagement
+    to: SubjectAsset
+    description: 项目评估范围所包含的评估对象、申报科目或识别出的表外资产负债
+
+  VERIFIED_BY:
+    from: SubjectAsset
+    to: ProcedureRecord
+    description: 针对该评估对象或科目执行的现场勘察、盘点、函证、权属核验等程序记录
+
+  VALUED_BY:
+    from: SubjectAsset
+    to: ValuationModel
+    description: 评估对象或科目所采用的评定估算模型（支持单一模型或双方法模型互证）
+
+  DERIVED_FROM:
+    from: ReportClaim
+    to: ValuationModel
+    description: 报告、说明及明细表中的评估结论或关键数值由哪张测算模型得出
+
+  USES_PARAM:
+    from: ValuationModel
+    to: Parameter
+    description: 测算模型使用并依赖的关键评估参数、修正系数或非经营性/溢余调整项
+
+  SOURCED_FROM:
+    from: Parameter | ProcedureRecord
+    to: SourceEvidence
+    description: 参数取值或程序核验所引用的原始底稿与外部客观证据
+
+  JUSTIFIED_BY:
+    from: ValuationModel | Parameter
+    to: AnalysisNote
+    description: 方法选取适用性论证，或关键参数取值的核查验证与合理性分析记录
+
+  DISCLOSES_FOR:
+    from: ReportClaim
+    to: SubjectAsset
+    description: 报告特别事项或评估说明针对特定对象权属瑕疵、期后事项或受限状态的披露关系
+
+# ------------------------------------------------------------
+# 3. 通用校验原语（5 Validation Primitives）
+# ------------------------------------------------------------
+validation_primitives:
+
+  - id: VP-01
+    code: SlotCompleteness
+    name: 必查槽位完备性
+    logic: 根据项目激活的 Profile，检查规定的必查 SubjectAsset、ProcedureRecord、Parameter、AnalysisNote 槽位是否全部非空
+    intercepts_penalties: [T-VA-02, T-VA-07, T-VA-08, T-FI-01, T-FI-02, T-DC-06, T-WP-01]
+    maps_to_question_groups: [substance, dcf, market, nonfinancial, financial-general, archive]
+
+  - id: VP-02
+    code: DualLinkSubstantiation
+    name: 参数双链防形式挂靠
+    logic: 关键 Parameter 若仅连向 client_provided 类型的 SourceEvidence，必须同时具备 external_independent/historical_audited 证据且具备 AnalysisNote，否则判为单链悬空
+    intercepts_penalties: [T-VA-01, T-VA-03, T-VA-04, T-VA-05, T-VA-06, T-DC-03]
+    maps_to_question_groups: [substance, dcf, market, nonfinancial]
+
+  - id: VP-03
+    code: CrossArtifactAlignment
+    name: 跨载体口径与数值对齐
+    logic: 核验报告/说明/明细表与测算表结论双向相等、模型与取数基准日一致、定额区域与资产所在地一致、核实表索引号与底稿文件名一致、权属瑕疵必有特别事项披露
+    intercepts_penalties: [T-RP-02, T-RP-05, T-VA-09, T-BM-01, T-AR-02]
+    maps_to_question_groups: [substance, report-errors, detail-errors, send-review, financial-general]
+
+  - id: VP-04
+    code: TimelineMonotonicity
+    name: 程序时间线单调性
+    logic: 校验 委托合同日 <= 现场勘察/盘点日 <= 程序完成日 <= 评估报告日 <= 归档日（报告后3个月内），且经济行为文件日 <= 评估报告日
+    intercepts_penalties: [T-RP-06, T-AR-05]
+    maps_to_question_groups: [report-errors, archive]
+
+  - id: VP-05
+    code: RoleSegregationAndSignoff
+    name: 职责分离与签署合规
+    logic: 校验 签字评估师 != 三级审核人、签字评估师实际参与核心程序、三级审核具备实质意见与回复闭环、权证/审计函证具备原件核对签字、盘点表具备三方签章
+    intercepts_penalties: [T-AR-04, T-FI-03, T-CT-01, T-XX-01, T-XX-02]
+    maps_to_question_groups: [send-review, management, financial-focus, archive]
+
+# ------------------------------------------------------------
+# 4. 扩展规则包注册表（Profiles Registry）
+# ------------------------------------------------------------
+profiles_registry:
+
+  - id: profile_common_gl_archive
+    name: 全项目通用管理、报告与归档包
+    trigger: "所有项目默认激活；按 regulatory_tags 激活国资/司法/征收附加项"
+    status: planned
+    question_groups: [send-review, management, general, report-errors, archive]
+
+  - id: profile_dcf
+    name: 收益法（DCF / 超额收益 / 减值测试）规则包
+    trigger: "'income_dcf' in Engagement.methods_adopted"
+    status: drafted_mvp
+    schema_ref: "schema/ontology_dcf_mvp.yaml"
+    question_groups: [dcf, substance]
+
+  - id: profile_market
+    name: 市场法（上市公司比较 / 交易案例比较）规则包
+    trigger: "'market' in Engagement.methods_adopted"
+    status: planned
+    question_groups: [market, substance]
+
+  - id: profile_physical_intangible
+    name: 单项实物与无形资产（成本法 / 不动产 / 设备 / 存货 / 专利）规则包
+    trigger: "SubjectAsset.subject_type in [real_estate_land, equipment_vehicle, inventory, intangible]"
+    status: planned
+    question_groups: [nonfinancial, financial-focus, detail-errors, substance]
+
+  - id: profile_financial_accounts
+    name: 资产基础法财务类科目核验规则包
+    trigger: "SubjectAsset.subject_type == 'financial_account'"
+    status: planned
+    step_table_ref: "questions/步骤复核表.yaml"
+    question_groups: [financial-general, financial-focus]
